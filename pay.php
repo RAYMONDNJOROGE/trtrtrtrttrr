@@ -1,74 +1,90 @@
 <?php
-if (isset($_POST['submit'])) {
-    date_default_timezone_set('Africa/Nairobi');
+if(isset($_POST['submit'])){
 
-    // Safaricom sandbox credentials
-    $consumerKey = '1bvBpyAQdFgnAxVgrPOoE0wNlnqdgqmTGw2ifirVgeG0gscJ';
-    $consumerSecret = 'hu1EnuMQO4asAmvwqRn65c5OZwDqTnYAz9hA5NQaL0GopQQOAkuJjRhGWFtOAiak';
-    $BusinessShortCode = '174379';
-    $Passkey = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';
 
-    // Get form inputs
-    $PartyA = $_POST['phone'];
-    $Amount = (int) $_POST['amount'];
+  date_default_timezone_set('Africa/Nairobi');
 
-    if (!preg_match('/^254\d{9}$/', $PartyA) || $Amount <= 0) {
-        die('Invalid phone number or amount.');
-    }
+  # access token
+  $consumerKey = '1bvBpyAQdFgnAxVgrPOoE0wNlnqdgqmTGw2ifirVgeG0gscJ'; //Fill with your app Consumer Key
+  $consumerSecret = 'hu1EnuMQO4asAmvwqRn65c5OZwDqTnYAz9hA5NQaL0GopQQOAkuJjRhGWFtOAiak'; // Fill with your app Secret
 
-    $AccountReference = 'Invoice001';
-    $TransactionDesc = 'Test Payment';
-    $Timestamp = date('YmdHis');
-    $Password = base64_encode($BusinessShortCode . $Passkey . $Timestamp);
+  # define the variales
+  # provide the following details, this part is found on your test credentials on the developer account
+  $BusinessShortCode = '174379';
+  $Passkey = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';  
+  
+  /*
+    This are your info, for
+    $PartyA should be the ACTUAL clients phone number or your phone number, format 2547********
+    $AccountRefference, it maybe invoice number, account number etc on production systems, but for test just put anything
+    TransactionDesc can be anything, probably a better description of or the transaction
+    $Amount this is the total invoiced amount, Any amount here will be 
+    actually deducted from a clients side/your test phone number once the PIN has been entered to authorize the transaction. 
+    for developer/test accounts, this money will be reversed automatically by midnight.
+  */
+  
+   $PartyA = $_POST['phone']; // This is your phone number, 
+  $AccountReference = '2255';
+  $TransactionDesc = 'Test Payment';
+  $Amount = $_POST['amount'];
+ 
+  # Get the timestamp, format YYYYmmddhms -> 20181004151020
+  $Timestamp = date('YmdHis');    
+  
+  # Get the base64 encoded string -> $password. The passkey is the M-PESA Public Key
+  $Password = base64_encode($BusinessShortCode.$Passkey.$Timestamp);
 
-    // Access Token
-    $access_token_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-    $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
-    $CallBackURL = 'https://yourdomain.com/callback.php'; // Change this to your actual URL
+  # header for access token
+  $headers = ['Content-Type:application/json; charset=utf8'];
 
-    // Step 1: Get access token
-    $headers = ['Content-Type:application/json; charset=utf8'];
-    $curl = curl_init($access_token_url);
-    curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_USERPWD, $consumerKey . ':' . $consumerSecret);
-    $result = curl_exec($curl);
-    curl_close($curl);
+    # M-PESA endpoint urls
+  $access_token_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
+  $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
 
-    $access_token = json_decode($result)->access_token ?? null;
+  # callback url
+  $CallBackURL = 'https://stormy-springs-60202-e606ef086ebb.herokuapp.com/callback_url.php';  
 
-    if (!$access_token) {
-        die('Failed to generate access token.');
-    }
+  $curl = curl_init($access_token_url);
+  curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+  curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
+  curl_setopt($curl, CURLOPT_HEADER, FALSE);
+  curl_setopt($curl, CURLOPT_USERPWD, $consumerKey.':'.$consumerSecret);
+  $result = curl_exec($curl);
+  $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+  $result = json_decode($result);
+  $access_token = $result->access_token;  
+  curl_close($curl);
 
-    // Step 2: Send STK Push request
-    $stkheader = [
-        'Content-Type: application/json',
-        'Authorization: Bearer ' . $access_token
-    ];
+  # header for stk push
+  $stkheader = ['Content-Type:application/json','Authorization:Bearer '.$access_token];
 
-    $postData = [
-        'BusinessShortCode' => $BusinessShortCode,
-        'Password' => $Password,
-        'Timestamp' => $Timestamp,
-        'TransactionType' => 'CustomerPayBillOnline',
-        'Amount' => $Amount,
-        'PartyA' => $PartyA,
-        'PartyB' => $BusinessShortCode,
-        'PhoneNumber' => $PartyA,
-        'CallBackURL' => $CallBackURL,
-        'AccountReference' => $AccountReference,
-        'TransactionDesc' => $TransactionDesc
-    ];
+  # initiating the transaction
+  $curl = curl_init();
+  curl_setopt($curl, CURLOPT_URL, $initiate_url);
+  curl_setopt($curl, CURLOPT_HTTPHEADER, $stkheader); //setting custom header
 
-    $curl = curl_init($initiate_url);
-    curl_setopt($curl, CURLOPT_HTTPHEADER, $stkheader);
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_POST, true);
-    curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($postData));
-    $response = curl_exec($curl);
-    curl_close($curl);
+  $curl_post_data = array(
+    //Fill in the request parameters with valid values
+    'BusinessShortCode' => $BusinessShortCode,
+    'Password' => $Password,
+    'Timestamp' => $Timestamp,
+    'TransactionType' => 'CustomerPayBillOnline',
+    'Amount' => $Amount,
+    'PartyA' => $PartyA,
+    'PartyB' => $BusinessShortCode,
+    'PhoneNumber' => $PartyA,
+    'CallBackURL' => $CallBackURL,
+    'AccountReference' => $AccountReference,
+    'TransactionDesc' => $TransactionDesc
+  );
 
-    echo $response;
-}
+  $data_string = json_encode($curl_post_data);
+  curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+  curl_setopt($curl, CURLOPT_POST, true);
+  curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
+  $curl_response = curl_exec($curl);
+  print_r($curl_response);
+
+  echo $curl_response;
+};
 ?>
